@@ -2,10 +2,32 @@ clear all
 close all
 clc
 %-------------------------------------------------------------------------%
+% Defining global variables                                               %
+%-------------------------------------------------------------------------%
+global k
+global lambda
+global mu_deep
+global mu_mix
+global gamma
+global ka
+global kd
+global del_d
+global AM
+global OM
+global kH
+global k1
+global k2
+global alk
+global del_a
+%global E
+%-------------------------------------------------------------------------%
 % Reading in data                                                         %
 %-------------------------------------------------------------------------%
-E                   = xlsread('../data/EmissionsProj.xlsx', 'B2:B265');
-E                   = E*10^15/12;
+Em                  = xlsread('../data/EmissionsProj.xlsx', 'B2:B265');
+El                  = xlsread('../data/EmissionsProj.xlsx', 'C2:C265');
+%Em                  = (Em+El)*10^15/12.0;
+Em                  = (Em)*10^15/12.0;
+emt                 = linspace(1751, 2014, length(Em));
 land_emissions      = xlsread('../data/EmissionsProj.xlsx', 'C2:C265');
 emissions_yrs       = xlsread('../data/EmissionsProj.xlsx', 'A2:A265');
 temp_data           = xlsread('../data/TempProj.xlsx', 'B2:B170');
@@ -16,7 +38,7 @@ CO2_yrs             = xlsread('../data/CO2_proj.xlsx', 'A2:A106');
 % Temperature variables                                                   %
 %-------------------------------------------------------------------------%
 k       = 5.35*3.154e+07;
-lambda  = 1.2*3.154e+07;
+%lambda  = 1.2*3.154e+07;
 mu_deep = 6.307e+09;
 mu_mix  = 3.154e+08;
 gamma   = 1.2*3.154e+07;
@@ -33,62 +55,46 @@ k1      = 1.44e-08;
 k2      = 8.154e-12;
 alk     = 767e+15/12.0;
 del_a   = OM/(AM*(1+del_d));
-%-------------------------------------------------------------------------%
-% Temperature initial conditions                                          %
-%-------------------------------------------------------------------------%
-t       = linspace(1751,2014, length(emissions_yrs));  
-dt      = abs(t(2)-t(1));
-T_mix   = zeros(1, length(t));
-T_deep  = zeros(1, length(t));
-%-------------------------------------------------------------------------%
-% CO2 initial conditions                                                  %
-%-------------------------------------------------------------------------%
-Qa      = zeros(1, length(t));
-Qu      = zeros(1, length(t));
-Ql      = zeros(1, length(t));
-temp    = zeros(1, length(t));
-Qa(1)   = 590*10^15/12;
-Qu(1)   = 713*10^15/12;
-Ql(1)   = 35658*10^15/12;
-count   = 1505;
-%-------------------------------------------------------------------------%
-% Time loop                                                               %
-%-------------------------------------------------------------------------%
-for i = 1:length(t)-1
-    %---------------------------------------------------------------------%
-    % Calculating H                                                       %
-    %---------------------------------------------------------------------%
-    qu  = Qu(i);
-    b   = k1*(1-qu/alk);
-    c   = k1*k2*(1 - (2.0*qu)/alk);
-    a   = 1.0;
-    H   = (-b - (b^2 - 4*a*c)^(0.5))/(2.0*a);
-    if H < 0.0
-        H = (-b + (b^2 - 4*a*c)^(0.5))/(2.0*a);
-    end
-    %---------------------------------------------------------------------%
-    % Calculating lambda                                                  %
-    %---------------------------------------------------------------------%
-    lambda  = 1 + k1/H + (k1*k2)/H^2;
-    %---------------------------------------------------------------------%
-    % Derivatives                                                         %
-    %---------------------------------------------------------------------%
-    d_Qa    = -ka*Qa(i) + ka*kH/(del_a*lambda)*Qu(i) + E(i);
-    d_Qu    = ka*Qu(i) - ka*kH/(del_a*lambda)*Qu(i) - kd*Qu(i) + kd/del_d *Ql(i);
-    d_Ql    = kd*Qu(i) -  kd/del_d*Ql(i);
 
-    Qa(i+1) = Qa(i) + dt*d_Qa; 
-    Qu(i+1) = Qu(i) + dt*d_Qu; 
-    Ql(i+1) = Ql(i) + dt*d_Ql; 
-    count   = count + 1;
-    temp(i) = H;
-end
-                      
-Qa  = Qa/AM*10^6;
-Qu  = Qu/AM*10^6;
-Ql  = Ql/AM*10^6;
+Qa      = 590*10^15/12;     
+Qu      = 713*10^15/12;     
+Ql      = 35658*10^15/12.0; 
+%-------------------------------------------------------------------------%
+% solving for CO2                                                         %
+%-------------------------------------------------------------------------%
+Qint    = [Qa; Qu; Ql]; 
+options        = odeset('MaxStep', 1);
+[t, out]       = ode45(@(t,y) func2(t, y, emt, Em), [1751 2014], Qint);
 hold on
 %plot(t, temp)
-plot(t, Qa, 'r')
-plot(CO2_yrs, CO2_data, 'b')
+Qa  = out(:,1)./AM.*10^6;
+plot(t, Qa, 'r', 'linewidth', 1.5)
+plot(CO2_yrs, CO2_data, 'b', 'linewidth', 1.5)
+legend('Model prediction', 'Historical CO$_{2}$', 'interpreter', 'latex', ...
+        'location' , 'Northwest')
+xlabel('Time [yrs]', 'interpreter', 'latex')
+ylabel('Atmospheric CO$_{2}$', 'interpreter', 'latex' )
+grid('on')
+xlim([1751, 2014])
 
+%-------------------------------------------------------------------------%
+% solving for temperature                                                 %
+%-------------------------------------------------------------------------%
+C           = Qa;
+C0          = 277.0;
+n           = k*log(C/C0); 
+lambda      = gamma;
+nt          = linspace(1751, 2014, length(n));
+Tint        = [0; 0];
+[t, out]    = ode45(@(t,y) func3(t, y, nt, n), [1751 2014], Tint);
+Tmix        = out(:,1);
+figure          
+hold on
+plot(t, Tmix, 'r', 'linewidth', 1.5)
+plot(temp_yrs, temp_data, 'b', 'linewidth', 1.5)
+legend('Model Prediction', 'Historical Temperature Anomaly', ...
+            'interpreter', 'latex', 'location' , 'Northwest')
+xlabel('Time [yrs]', 'interpreter', 'latex')
+ylabel('Temperature Anomaly [K]', 'interpreter', 'latex' )
+grid('on')
+xlim([1751, 2014])
